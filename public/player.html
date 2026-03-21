@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Queue Player</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="player-page">
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo-icon-sm">▶</div>
+      <span class="app-title">YT Queue<span class="accent">Player</span></span>
+    </div>
+    <div class="header-right">
+      <div class="status-badge">
+        <span class="online-dot"></span>
+        <span id="userCount">0 online</span>
+      </div>
+      <div class="user-chip" id="userChip">
+        <span class="user-avatar" id="userAvatar">?</span>
+        <span id="usernameDisplay">Guest</span>
+      </div>
+      <button id="logoutBtn" class="btn btn-ghost btn-sm">Keluar</button>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <main class="app-main">
+
+    <!-- LEFT: Player + Submit -->
+    <section class="player-section">
+
+      <!-- YouTube Player -->
+      <div class="player-wrapper">
+        <div id="playerContainer" class="player-container">
+          <div id="emptyState" class="empty-state">
+            <div class="empty-icon">🎬</div>
+            <h2>Queue Kosong</h2>
+            <p>Tambahkan URL YouTube di bawah untuk mulai memutar.</p>
+          </div>
+          <div id="youtubePlayer" class="yt-player hidden"></div>
+        </div>
+        <div id="nowPlayingBar" class="now-playing-bar hidden">
+          <span class="now-playing-label">▶ NOW PLAYING</span>
+          <span id="nowPlayingTitle" class="now-playing-title">—</span>
+        </div>
+      </div>
+
+      <!-- Submit Form -->
+      <div class="submit-card">
+        <h3 class="submit-title">Tambah Video ke Queue</h3>
+        <form id="submitForm" class="submit-form">
+          <div class="url-input-wrap">
+            <span class="url-icon">🔗</span>
+            <input
+              id="urlInput"
+              type="url"
+              placeholder="Paste YouTube URL... (https://youtube.com/watch?v=...)"
+              autocomplete="off"
+            />
+            <button type="submit" id="submitBtn" class="btn btn-primary">
+              <span id="submitBtnText">Tambah</span>
+            </button>
+          </div>
+        </form>
+        <div id="submitError" class="error-msg hidden"></div>
+        <div id="submitSuccess" class="success-msg hidden">✓ Video berhasil ditambahkan ke queue!</div>
+      </div>
+
+    </section>
+
+    <!-- RIGHT: Queue List -->
+    <aside class="queue-section">
+      <div class="queue-header">
+        <h2 class="queue-title">
+          <span class="queue-icon">📋</span> Antrean Video
+        </h2>
+        <span id="queueCount" class="queue-badge">0</span>
+      </div>
+
+      <div id="queueList" class="queue-list">
+        <div class="queue-empty">
+          <span>Queue masih kosong...</span>
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script>
+    // Check service status before loading app
+    (async () => {
+      try {
+        const res = await fetch('/api/status');
+        const { serviceEnabled } = await res.json();
+        if (!serviceEnabled) window.location.replace('/maintenance.html');
+      } catch (_) {}
+    })();
+  </script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

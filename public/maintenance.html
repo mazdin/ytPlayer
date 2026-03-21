@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YT Queue Player — Service Gangguan</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="maintenance-page">
+  <div class="maint-bg">
+    <div class="maint-orb orb-1"></div>
+    <div class="maint-orb orb-2"></div>
+    <div class="maint-orb orb-3"></div>
+  </div>
+
+  <div class="maint-container">
+    <div class="maint-card">
+      <div class="maint-icon-wrap">
+        <div class="maint-icon">🔧</div>
+        <div class="maint-pulse"></div>
+      </div>
+
+      <h1 class="maint-title">Mohon Maaf</h1>
+      <p class="maint-subtitle">Service Sedang Gangguan</p>
+
+      <div class="maint-divider"></div>
+
+      <p class="maint-desc">
+        Kami sedang melakukan pemeliharaan sistem untuk memberikan<br/>
+        pengalaman yang lebih baik. Silakan coba beberapa saat lagi.
+      </p>
+
+      <div class="maint-status-row">
+        <span class="maint-dot offline"></span>
+        <span class="maint-status-text">Status: <strong>Maintenance</strong></span>
+      </div>
+
+      <button class="btn btn-outline maint-retry-btn" id="retryBtn" onclick="checkService()">
+        <span>🔄</span> Coba Lagi
+      </button>
+
+      <div class="maint-footer">
+        <span>YT Queue</span><span class="accent">Player</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+
+    // Listen for service status changes in real-time
+    socket.on('service-status', ({ serviceEnabled }) => {
+      if (serviceEnabled) {
+        // Service is back ON — redirect to home
+        window.location.href = '/';
+      }
+    });
+
+    async function checkService() {
+      const btn = document.getElementById('retryBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳</span> Memeriksa...';
+      try {
+        const res = await fetch('/api/status');
+        const { serviceEnabled } = await res.json();
+        if (serviceEnabled) {
+          window.location.href = '/';
+        } else {
+          btn.innerHTML = '<span>❌</span> Masih Gangguan';
+          setTimeout(() => {
+            btn.disabled = false;
+            btn.innerHTML = '<span>🔄</span> Coba Lagi';
+          }, 2000);
+        }
+      } catch {
+        btn.innerHTML = '<span>❌</span> Gagal Terhubung';
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.innerHTML = '<span>🔄</span> Coba Lagi';
+        }, 2000);
+      }
+    }
+  </script>
+</body>
+</html>

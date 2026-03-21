@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube Queue Player — Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="login-page">
+  <div class="login-bg">
+    <div class="login-orb orb-1"></div>
+    <div class="login-orb orb-2"></div>
+    <div class="login-orb orb-3"></div>
+  </div>
+
+  <div class="login-container">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="logo-icon">▶</div>
+        <h1>YT Queue<span class="accent">Player</span></h1>
+      </div>
+      <p class="login-subtitle">Nonton YouTube bareng, satu queue, semua sync.</p>
+
+      <form id="loginForm" class="login-form" autocomplete="off">
+        <div class="input-group">
+          <label for="usernameInput">Nama Pengguna</label>
+          <input
+            id="usernameInput"
+            type="text"
+            placeholder="Masukkan nama kamu..."
+            maxlength="32"
+            autocomplete="off"
+            required
+          />
+        </div>
+        <div id="loginError" class="error-msg hidden"></div>
+        <button type="submit" id="loginBtn" class="btn btn-primary btn-full">
+          <span class="btn-text">Masuk Sekarang</span>
+          <span class="btn-icon">→</span>
+        </button>
+      </form>
+
+      <div class="login-footer">
+        <span class="online-dot"></span>
+        <span id="userCountLogin">0 pengguna online</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = window._socket = io();
+
+    // Check service status immediately on page load
+    (async () => {
+      try {
+        const res = await fetch('/api/status');
+        const { serviceEnabled } = await res.json();
+        if (!serviceEnabled) window.location.replace('/maintenance.html');
+      } catch (_) {}
+    })();
+
+    // Listen for real-time service toggle from admin
+    socket.on('service-status', ({ serviceEnabled }) => {
+      if (!serviceEnabled) window.location.replace('/maintenance.html');
+    });
+
+    socket.on('user-count', count => {
+      document.getElementById('userCountLogin').textContent =
+        `${count} pengguna online`;
+    });
+
+    document.getElementById('loginForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const username = document.getElementById('usernameInput').value.trim();
+      if (!username) return;
+      document.getElementById('loginBtn').disabled = true;
+      document.getElementById('loginBtn').querySelector('.btn-text').textContent = 'Masuk...';
+      socket.emit('login', { username });
+    });
+
+    socket.on('login-success', ({ username }) => {
+      sessionStorage.setItem('username', username);
+      window.location.href = '/player.html';
+    });
+
+    socket.on('login-error', msg => {
+      const el = document.getElementById('loginError');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+      document.getElementById('loginBtn').disabled = false;
+      document.getElementById('loginBtn').querySelector('.btn-text').textContent = 'Masuk Sekarang';
+    });
+  </script>
+</body>
+</html>

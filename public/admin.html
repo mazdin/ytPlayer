@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YT Queue Player — Admin Settings</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="admin-page">
+  <div class="login-bg">
+    <div class="login-orb orb-1"></div>
+    <div class="login-orb orb-2"></div>
+    <div class="login-orb orb-3"></div>
+  </div>
+
+  <div class="admin-container">
+    <div class="admin-card">
+
+      <!-- Header -->
+      <div class="admin-header">
+        <div class="logo-icon">⚙</div>
+        <h1>Admin <span class="accent">Settings</span></h1>
+        <p class="admin-subtitle">Kelola status layanan YT Queue Player</p>
+      </div>
+
+      <!-- Secret Key Input -->
+      <div id="authSection" class="admin-section">
+        <div class="input-group">
+          <label for="secretInput">Admin Secret Key</label>
+          <input
+            id="secretInput"
+            type="password"
+            placeholder="Masukkan secret key admin..."
+            autocomplete="off"
+          />
+        </div>
+        <div id="authError" class="error-msg hidden"></div>
+        <button class="btn btn-primary btn-full" id="authBtn" onclick="authenticate()">
+          <span class="btn-text">Login Admin</span>
+          <span class="btn-icon">→</span>
+        </button>
+      </div>
+
+      <!-- Control Panel (shown after auth) -->
+      <div id="controlSection" class="admin-section hidden">
+
+        <div class="service-status-card" id="statusCard">
+          <div class="service-indicator" id="serviceIndicator">
+            <div class="service-dot" id="serviceDot"></div>
+            <div>
+              <div class="service-label">Status Layanan</div>
+              <div class="service-value" id="serviceValueText">Loading...</div>
+            </div>
+          </div>
+          <div class="service-badge" id="serviceBadge">—</div>
+        </div>
+
+        <div class="toggle-row">
+          <span class="toggle-label">Service</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="serviceToggle" onchange="toggleService()" />
+            <span class="toggle-slider">
+              <span class="toggle-knob"></span>
+            </span>
+          </label>
+        </div>
+
+        <div id="controlMsg" class="control-msg hidden"></div>
+
+        <div class="admin-info-box">
+          <p>💡 <strong>ON</strong> → Aplikasi berjalan normal untuk semua pengguna.</p>
+          <p>🔧 <strong>OFF</strong> → Semua pengguna diarahkan ke halaman maintenance.</p>
+        </div>
+
+        <a href="/" class="btn btn-ghost btn-full admin-back-btn">← Kembali ke Aplikasi</a>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    let adminSecret = '';
+    const socket = io();
+
+    // Listen for real-time status updates
+    socket.on('service-status', ({ serviceEnabled }) => {
+      updateStatusUI(serviceEnabled);
+    });
+
+    async function authenticate() {
+      const secret = document.getElementById('secretInput').value.trim();
+      if (!secret) return;
+
+      const btn = document.getElementById('authBtn');
+      btn.disabled = true;
+      btn.querySelector('.btn-text').textContent = 'Memeriksa...';
+
+      try {
+        // Probe with a neutral toggle matching current state to verify secret
+        const statusRes = await fetch('/api/status');
+        const { serviceEnabled } = await statusRes.json();
+
+        const res = await fetch('/api/admin/service', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret, enabled: serviceEnabled }) // same value = no change
+        });
+
+        if (res.status === 403) {
+          showAuthError('Secret key salah. Coba lagi.');
+          btn.disabled = false;
+          btn.querySelector('.btn-text').textContent = 'Login Admin';
+          return;
+        }
+
+        adminSecret = secret;
+        document.getElementById('authSection').classList.add('hidden');
+        document.getElementById('controlSection').classList.remove('hidden');
+        updateStatusUI(serviceEnabled);
+
+      } catch {
+        showAuthError('Gagal terhubung ke server.');
+        btn.disabled = false;
+        btn.querySelector('.btn-text').textContent = 'Login Admin';
+      }
+    }
+
+    function showAuthError(msg) {
+      const el = document.getElementById('authError');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    function updateStatusUI(enabled) {
+      const dot = document.getElementById('serviceDot');
+      const badge = document.getElementById('serviceBadge');
+      const valueText = document.getElementById('serviceValueText');
+      const toggle = document.getElementById('serviceToggle');
+      const card = document.getElementById('statusCard');
+
+      toggle.checked = enabled;
+      if (enabled) {
+        dot.className = 'service-dot dot-on';
+        badge.textContent = 'AKTIF';
+        badge.className = 'service-badge badge-on';
+        valueText.textContent = 'Berjalan Normal';
+        card.className = 'service-status-card card-on';
+      } else {
+        dot.className = 'service-dot dot-off';
+        badge.textContent = 'MAINTENANCE';
+        badge.className = 'service-badge badge-off';
+        valueText.textContent = 'Mode Maintenance';
+        card.className = 'service-status-card card-off';
+      }
+    }
+
+    async function toggleService() {
+      const enabled = document.getElementById('serviceToggle').checked;
+      const msgEl = document.getElementById('controlMsg');
+
+      try {
+        const res = await fetch('/api/admin/service', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ secret: adminSecret, enabled })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          msgEl.textContent = '❌ ' + data.error;
+          msgEl.className = 'control-msg error-msg';
+          msgEl.classList.remove('hidden');
+          return;
+        }
+
+        msgEl.textContent = enabled
+          ? '✅ Service berhasil diaktifkan! Pengguna dapat mengakses aplikasi.'
+          : '🔧 Service berhasil dimatikan. Pengguna akan melihat halaman maintenance.';
+        msgEl.className = 'control-msg success-msg';
+        msgEl.classList.remove('hidden');
+        setTimeout(() => msgEl.classList.add('hidden'), 4000);
+
+      } catch {
+        msgEl.textContent = '❌ Gagal terhubung ke server.';
+        msgEl.className = 'control-msg error-msg';
+        msgEl.classList.remove('hidden');
+      }
+    }
+
+    // Allow Enter key on secret input
+    document.getElementById('secretInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') authenticate();
+    });
+  </script>
+</body>
+</html>
