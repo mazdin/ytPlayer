@@ -93,6 +93,8 @@ io.on('connection', (socket) => {
     }
 
     const role = (adminKey === ADMIN_SECRET) ? 'admin' : 'user';
+    console.log(`[🔐] Login Attempt: User="${name}", Role="${role}", KeyMatch=${adminKey === ADMIN_SECRET}`);
+    
     users[socket.id] = { username: name, role };
 
     socket.emit('login-success', { username: name, role });
