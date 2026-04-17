@@ -37,6 +37,15 @@
             required
           />
         </div>
+        <div class="input-group">
+          <label for="adminKeyInput">Admin Key (Opsional)</label>
+          <input
+            id="adminKeyInput"
+            type="password"
+            placeholder="Kosongkan jika bukan admin..."
+            autocomplete="off"
+          />
+        </div>
         <div id="loginError" class="error-msg hidden"></div>
         <button type="submit" id="loginBtn" class="btn btn-primary btn-full">
           <span class="btn-text">Masuk Sekarang</span>
@@ -77,14 +86,19 @@
     document.getElementById('loginForm').addEventListener('submit', e => {
       e.preventDefault();
       const username = document.getElementById('usernameInput').value.trim();
+      const adminKey = document.getElementById('adminKeyInput').value.trim();
       if (!username) return;
       document.getElementById('loginBtn').disabled = true;
       document.getElementById('loginBtn').querySelector('.btn-text').textContent = 'Masuk...';
-      socket.emit('login', { username });
+      socket.emit('login', { username, adminKey });
     });
 
-    socket.on('login-success', ({ username }) => {
+    socket.on('login-success', ({ username, role }) => {
       sessionStorage.setItem('username', username);
+      sessionStorage.setItem('role', role);
+      // Store adminKey if provided for reconnects (insecure but works for this simple app)
+      const adminKey = document.getElementById('adminKeyInput').value.trim();
+      if (adminKey) sessionStorage.setItem('adminKey', adminKey);
       window.location.href = '/player.html';
     });
 

@@ -84,16 +84,19 @@ io.on('connection', (socket) => {
   socket.emit('sync-state', { queue, currentIndex });
 
   // ── Login ──
-  socket.on('login', ({ username }) => {
+  socket.on('login', ({ username, adminKey }) => {
     const name = (username || '').trim().slice(0, 32);
     if (!name) {
       socket.emit('login-error', 'Username tidak boleh kosong.');
       return;
     }
-    users[socket.id] = { username: name };
-    socket.emit('login-success', { username: name });
+
+    const role = (adminKey === ADMIN_SECRET) ? 'admin' : 'user';
+    users[socket.id] = { username: name, role };
+
+    socket.emit('login-success', { username: name, role });
     io.emit('user-count', Object.keys(users).length);
-    console.log(`[*] Login: ${name} (${socket.id})`);
+    console.log(`[*] Login: ${name} (${socket.id}) as ${role}`);
   });
 
   // ── Add Video ──
@@ -166,10 +169,13 @@ io.on('connection', (socket) => {
     io.emit('queue-update', { queue, currentIndex });
   });
 
-  // ── Skip (admin-like action from any user for now) ──
+  // ── Skip (admin only) ──
   socket.on('skip-video', () => {
     const user = users[socket.id];
-    if (!user) return;
+    if (!user || user.role !== 'admin') {
+      console.log(`[!] Skip rejected: Unauthorized user ${user ? user.username : 'Unknown'}`);
+      return;
+    }
 
     if (queue.length === 0) return;
 
@@ -180,10 +186,13 @@ io.on('connection', (socket) => {
     io.emit('queue-update', { queue, currentIndex });
   });
 
-  // ── Remove from queue ──
+  // ── Remove from queue (admin only) ──
   socket.on('remove-video', ({ id }) => {
     const user = users[socket.id];
-    if (!user) return;
+    if (!user || user.role !== 'admin') {
+      console.log(`[!] Remove rejected: Unauthorized user ${user ? user.username : 'Unknown'}`);
+      return;
+    }
 
     const idx = queue.findIndex(v => v.id === id);
     if (idx === -1) return;

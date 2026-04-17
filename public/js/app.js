@@ -3,6 +3,9 @@
 
 // ─── Auth Guard ──────────────────────────────────────────────────────────────
 const username = sessionStorage.getItem('username');
+const role     = sessionStorage.getItem('role') || 'user';
+const adminKey = sessionStorage.getItem('adminKey'); // Optional
+
 if (!username) {
   window.location.href = '/';
 }
@@ -39,7 +42,7 @@ const socket = io();
 
 socket.on('connect', () => {
   // Re-login after reconnect if session exists
-  socket.emit('login', { username });
+  socket.emit('login', { username, adminKey });
 });
 
 socket.on('user-count', count => {
@@ -127,8 +130,8 @@ function renderQueue(queue, currentIndex) {
           <div class="queue-item-meta">oleh ${escapeHtml(item.addedBy)}</div>
         </div>
         <div class="queue-item-actions">
-          ${playing ? `<button class="icon-btn skip" onclick="skipVideo()" title="Skip">⏭</button>` : ''}
-          <button class="icon-btn danger" onclick="removeVideo(${item.id})" title="Hapus">✕</button>
+          ${(playing && role === 'admin') ? `<button class="icon-btn skip" onclick="skipVideo()" title="Skip">⏭</button>` : ''}
+          ${(role === 'admin') ? `<button class="icon-btn danger" onclick="removeVideo(${item.id})" title="Hapus">✕</button>` : ''}
         </div>
       </div>
     `;
