@@ -23,7 +23,7 @@ let idCounter = 0;
 let serviceEnabled = true; // Maintenance mode toggle
 
 // ─── Admin Config ─────────────────────────────────────────────────────────────
-const ADMIN_SECRET = process.env.ADMIN_SECRET || 'admin1234';
+const ADMIN_SECRET = (process.env.ADMIN_SECRET || 'admin1234').trim();
 console.log(`[🛡️] Admin Secret status: ${ADMIN_SECRET === 'admin1234' ? 'MENGGUNAKAN DEFAULT (admin1234)' : 'MENGGUNAKAN DARI ENV (Custom)'}`);
 
 // ─── YouTube URL Utilities ───────────────────────────────────────────────────
