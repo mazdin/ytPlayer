@@ -64,8 +64,10 @@ app.get('/api/status', (req, res) => {
 app.post('/api/admin/service', (req, res) => {
   const { secret, enabled } = req.body;
   if (secret !== ADMIN_SECRET) {
+    console.log(`[🚫] Admin Service Access Denied: Incorrect Secret. Expected length: ${ADMIN_SECRET.length}`);
     return res.status(403).json({ error: 'Akses ditolak. Secret salah.' });
   }
+  console.log(`[✅] Admin Service Access Granted.`);
   if (typeof enabled !== 'boolean') {
     return res.status(400).json({ error: 'Field "enabled" harus boolean.' });
   }
