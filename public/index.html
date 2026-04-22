@@ -55,60 +55,76 @@
 
       <div class="login-footer">
         <span class="online-dot"></span>
-        <span id="userCountLogin">0 pengguna online</span>
+        <span id="userCountLogin">Sinkronisasi Real-time Aktif</span>
       </div>
     </div>
   </div>
 
-  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://js.pusher.com/8.0.1/pusher.min.js"></script>
   <script>
-    const socket = window._socket = io();
+    let pusher = null;
+    let channel = null;
 
     // Check service status immediately on page load
     (async () => {
       try {
-        const res = await fetch('/api/status');
+        const res = await fetch('/api/state');
         const { serviceEnabled } = await res.json();
         if (!serviceEnabled) window.location.replace('/maintenance.html');
+
+        // Init Pusher for real-time maintenance updates
+        const configRes = await fetch('/api/config');
+        const { pusherKey, pusherCluster } = await configRes.json();
+        
+        if (pusherKey) {
+          pusher = new Pusher(pusherKey, { cluster: pusherCluster });
+          channel = pusher.subscribe('yt-player-channel');
+          channel.bind('service-status', ({ serviceEnabled }) => {
+            if (!serviceEnabled) window.location.replace('/maintenance.html');
+          });
+        }
       } catch (_) {}
     })();
 
-    // Listen for real-time service toggle from admin
-    socket.on('service-status', ({ serviceEnabled }) => {
-      if (!serviceEnabled) window.location.replace('/maintenance.html');
-    });
-
-    socket.on('user-count', count => {
-      document.getElementById('userCountLogin').textContent =
-        `${count} pengguna online`;
-    });
-
-    document.getElementById('loginForm').addEventListener('submit', e => {
+    document.getElementById('loginForm').addEventListener('submit', async e => {
       e.preventDefault();
       const username = document.getElementById('usernameInput').value.trim();
       const adminKey = document.getElementById('adminKeyInput').value.trim();
       if (!username) return;
-      document.getElementById('loginBtn').disabled = true;
-      document.getElementById('loginBtn').querySelector('.btn-text').textContent = 'Masuk...';
-      socket.emit('login', { username, adminKey });
+
+      const btn = document.getElementById('loginBtn');
+      btn.disabled = true;
+      btn.querySelector('.btn-text').textContent = 'Masuk...';
+
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, adminKey })
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          sessionStorage.setItem('username', data.username);
+          sessionStorage.setItem('role', data.role);
+          if (adminKey) sessionStorage.setItem('adminKey', adminKey);
+          window.location.href = '/player.html';
+        } else {
+          showError(data.error || 'Gagal login.');
+        }
+      } catch (err) {
+        showError('Gagal terhubung ke server.');
+      }
     });
 
-    socket.on('login-success', ({ username, role }) => {
-      sessionStorage.setItem('username', username);
-      sessionStorage.setItem('role', role);
-      // Store adminKey if provided for reconnects (insecure but works for this simple app)
-      const adminKey = document.getElementById('adminKeyInput').value.trim();
-      if (adminKey) sessionStorage.setItem('adminKey', adminKey);
-      window.location.href = '/player.html';
-    });
-
-    socket.on('login-error', msg => {
+    function showError(msg) {
       const el = document.getElementById('loginError');
       el.textContent = msg;
       el.classList.remove('hidden');
-      document.getElementById('loginBtn').disabled = false;
-      document.getElementById('loginBtn').querySelector('.btn-text').textContent = 'Masuk Sekarang';
-    });
+      const btn = document.getElementById('loginBtn');
+      btn.disabled = false;
+      btn.querySelector('.btn-text').textContent = 'Masuk Sekarang';
+    }
   </script>
 </body>
 </html>

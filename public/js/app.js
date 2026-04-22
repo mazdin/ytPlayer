@@ -1,4 +1,4 @@
-/* ── YouTube Queue Player — Frontend App ──────────────────────────────────── */
+/* ── YouTube Queue Player — Frontend App (Serverless Version) ───────────────── */
 'use strict';
 
 // ─── Auth Guard ──────────────────────────────────────────────────────────────
@@ -34,49 +34,61 @@ userAvatar.textContent = username.charAt(0).toUpperCase();
 
 logoutBtn.addEventListener('click', () => {
   sessionStorage.removeItem('username');
+  sessionStorage.removeItem('adminKey');
+  sessionStorage.removeItem('role');
   window.location.href = '/';
 });
 
-// ─── Socket.io ───────────────────────────────────────────────────────────────
-const socket = io();
+// ─── Pusher Real-time ────────────────────────────────────────────────────────
+let pusher = null;
+let channel = null;
 
-socket.on('connect', () => {
-  // Re-login after reconnect if session exists
-  socket.emit('login', { username, adminKey });
-});
+async function initRealtime() {
+  try {
+    // 1. Get config
+    const configRes = await fetch('/api/config');
+    const { pusherKey, pusherCluster } = await configRes.json();
 
-socket.on('user-count', count => {
-  userCountEl.textContent = `${count} online`;
-});
+    if (!pusherKey) {
+      console.error('Pusher key not found. Make sure .env is configured.');
+      return;
+    }
 
-// Real-time maintenance mode: redirect if admin turns service OFF
-socket.on('service-status', ({ serviceEnabled }) => {
-  if (!serviceEnabled) window.location.replace('/maintenance.html');
-});
+    // 2. Initialize Pusher
+    pusher = new Pusher(pusherKey, { cluster: pusherCluster });
+    channel = pusher.subscribe('yt-player-channel');
 
-socket.on('sync-state', ({ queue, currentIndex }) => {
-  renderQueue(queue, currentIndex);
-  syncPlayer(queue, currentIndex);
-});
+    // 3. Bind Events
+    channel.bind('queue-update', ({ queue, currentIndex }) => {
+      renderQueue(queue, currentIndex);
+      syncPlayer(queue, currentIndex);
+    });
 
-socket.on('queue-update', ({ queue, currentIndex }) => {
-  renderQueue(queue, currentIndex);
-  syncPlayer(queue, currentIndex);
-});
+    channel.bind('service-status', ({ serviceEnabled }) => {
+      if (!serviceEnabled) window.location.replace('/maintenance.html');
+    });
 
-socket.on('add-success', () => {
-  urlInput.value = '';
-  showSuccess();
-  resetSubmitBtn();
-});
+    // 4. Initial Sync
+    const stateRes = await fetch('/api/state');
+    const { queue, currentIndex, serviceEnabled } = await stateRes.json();
+    
+    if (!serviceEnabled) {
+      window.location.replace('/maintenance.html');
+      return;
+    }
 
-socket.on('add-error', msg => {
-  showError(msg);
-  resetSubmitBtn();
-});
+    renderQueue(queue, currentIndex);
+    syncPlayer(queue, currentIndex);
+
+  } catch (err) {
+    console.error('Failed to initialize realtime:', err);
+  }
+}
+
+initRealtime();
 
 // ─── Submit Form ─────────────────────────────────────────────────────────────
-submitForm.addEventListener('submit', e => {
+submitForm.addEventListener('submit', async e => {
   e.preventDefault();
   const url = urlInput.value.trim();
   if (!url) return;
@@ -84,7 +96,26 @@ submitForm.addEventListener('submit', e => {
   hideMessages();
   submitBtn.disabled = true;
   submitBtnText.textContent = '...';
-  socket.emit('add-video', { url });
+
+  try {
+    const res = await fetch('/api/add-video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, username })
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      urlInput.value = '';
+      showSuccess();
+    } else {
+      showError(data.error || 'Gagal menambahkan video.');
+    }
+  } catch (err) {
+    showError('Kesalahan koneksi ke server.');
+  } finally {
+    resetSubmitBtn();
+  }
 });
 
 function resetSubmitBtn() {
@@ -152,11 +183,20 @@ function escapeHtml(str) {
 }
 
 // ─── Queue Actions ────────────────────────────────────────────────────────────
-window.skipVideo = function () {
-  socket.emit('skip-video');
+window.skipVideo = async function () {
+  await fetch('/api/admin/skip', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminKey })
+  });
 };
-window.removeVideo = function (id) {
-  socket.emit('remove-video', { id });
+
+window.removeVideo = async function (id) {
+  await fetch('/api/admin/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminKey, id })
+  });
 };
 
 // ─── YouTube IFrame Player ───────────────────────────────────────────────────
@@ -213,22 +253,19 @@ function loadVideo(videoId) {
 }
 
 function onPlayerStateChange(event) {
-  // YT.PlayerState.ENDED = 0
   if (event.data === YT.PlayerState.ENDED) {
-    socket.emit('video-ended');
+    fetch('/api/video-ended', { method: 'POST' });
   }
 }
 
 function onPlayerError(event) {
   console.warn('YouTube player error:', event.data);
-  // Auto-skip on unplayable video
-  setTimeout(() => socket.emit('video-ended'), 1500);
+  setTimeout(() => fetch('/api/video-ended', { method: 'POST' }), 1500);
 }
 
 // ─── Sync Player with Queue State ─────────────────────────────────────────────
 function syncPlayer(queue, currentIndex) {
   if (queue.length === 0 || currentIndex < 0) {
-    // Show empty state
     emptyState.classList.remove('hidden');
     youtubePlayer.classList.add('hidden');
     nowPlayingBar.classList.add('hidden');
@@ -239,31 +276,32 @@ function syncPlayer(queue, currentIndex) {
   const video = queue[currentIndex];
   if (!video) return;
 
-  // Only load if video changed
   if (video.videoId !== currentVideoId) {
     loadVideo(video.videoId);
   }
 
-  // Update now-playing bar
   nowPlayingBar.classList.remove('hidden');
   nowPlayingTitle.textContent = video.title;
 }
 
-// ─── Fetch Video Title via oEmbed ─────────────────────────────────────────────
+// ─── Fetch Video Title ────────────────────────────────────────────────────────
 function fetchVideoTitle(videoId) {
   const oEmbedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
   fetch(oEmbedUrl)
     .then(r => r.ok ? r.json() : null)
     .then(data => {
       if (data && data.title) {
-        socket.emit('update-title', { videoId, title: data.title });
+        fetch('/api/update-title', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoId, title: data.title })
+        });
         nowPlayingTitle.textContent = data.title;
-        // Update queue item title locally too
         const el = document.getElementById(`title-${findQueueItemIdByVideoId(videoId)}`);
         if (el) el.textContent = data.title;
       }
     })
-    .catch(() => {/* Silently fail — title stays as Video ID */});
+    .catch(() => {});
 }
 
 function findQueueItemIdByVideoId(videoId) {

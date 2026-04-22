@@ -94,13 +94,13 @@
 
   </main>
 
-  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://js.pusher.com/8.0.1/pusher.min.js"></script>
   <script src="https://www.youtube.com/iframe_api"></script>
   <script>
     // Check service status before loading app
     (async () => {
       try {
-        const res = await fetch('/api/status');
+        const res = await fetch('/api/state');
         const { serviceEnabled } = await res.json();
         if (!serviceEnabled) window.location.replace('/maintenance.html');
       } catch (_) {}

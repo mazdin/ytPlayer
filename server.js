@@ -1,30 +1,27 @@
 require('dotenv').config();
 const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const Pusher = require('pusher');
+const { db, initDB } = require('./db');
 
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+
+// ─── Pusher Config ──────────────────────────────────────────────────────────
+const pusher = new Pusher({
+  appId: process.env.PUSHER_APP_ID,
+  key: process.env.PUSHER_KEY,
+  secret: process.env.PUSHER_SECRET,
+  cluster: process.env.PUSHER_CLUSTER || 'ap1',
+  useTLS: true
 });
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── In-Memory State ────────────────────────────────────────────────────────
-let queue = [];           // Array of { id, videoId, title, thumbnail, addedBy }
-let currentIndex = -1;   // Index of currently playing video
-let users = {};          // socketId -> { username }
-let idCounter = 0;
-let serviceEnabled = true; // Maintenance mode toggle
-
 // ─── Admin Config ─────────────────────────────────────────────────────────────
 const ADMIN_SECRET = (process.env.ADMIN_SECRET || 'admin1111').trim();
-console.log(`[🛡️] Admin Secret status: ${ADMIN_SECRET === 'admin1111' ? 'MENGGUNAKAN DEFAULT (admin1111)' : 'MENGGUNAKAN DARI ENV (Custom)'}`);
 
 // ─── YouTube URL Utilities ───────────────────────────────────────────────────
 function extractVideoId(url) {
@@ -50,182 +47,130 @@ function getYouTubeThumbnail(videoId) {
   return `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
 }
 
+// ─── Helper: Broadcast State ────────────────────────────────────────────────
+async function broadcastUpdate() {
+  const queue = await db.getQueue();
+  const currentIndex = queue.length > 0 ? 0 : -1;
+  pusher.trigger('yt-player-channel', 'queue-update', { queue, currentIndex });
+}
+
 // ─── REST API ────────────────────────────────────────────────────────────────
-app.get('/api/state', (req, res) => {
-  res.json({ queue, currentIndex });
+
+// Get current state
+app.get('/api/state', async (req, res) => {
+  const queue = await db.getQueue();
+  const currentIndex = queue.length > 0 ? 0 : -1;
+  const serviceEnabled = await db.getServiceStatus();
+  res.json({ queue, currentIndex, serviceEnabled });
 });
 
-// Public endpoint: cek status service
-app.get('/api/status', (req, res) => {
+app.get('/api/status', async (req, res) => {
+  const serviceEnabled = await db.getServiceStatus();
   res.json({ serviceEnabled });
 });
 
-// Admin endpoint: toggle service ON/OFF
-app.post('/api/admin/service', (req, res) => {
+// Get frontend config (Pusher key)
+app.get('/api/config', (req, res) => {
+  res.json({
+    pusherKey: process.env.PUSHER_KEY,
+    pusherCluster: process.env.PUSHER_CLUSTER || 'ap1'
+  });
+});
+
+// Login
+app.post('/api/login', (req, res) => {
+  const { username, adminKey } = req.body;
+  const name = (username || '').trim().slice(0, 32);
+  if (!name) return res.status(400).json({ error: 'Username tidak boleh kosong.' });
+
+  const role = (adminKey === ADMIN_SECRET) ? 'admin' : 'user';
+  res.json({ username: name, role });
+});
+
+// Add Video
+app.post('/api/add-video', async (req, res) => {
+  const { url, username } = req.body;
+  if (!username) return res.status(401).json({ error: 'Silakan login terlebih dahulu.' });
+
+  const videoId = extractVideoId((url || '').trim());
+  if (!videoId) return res.status(400).json({ error: 'URL YouTube tidak valid.' });
+
+  const queue = await db.getQueue();
+  if (queue.some(v => v.videoId === videoId)) {
+    return res.status(400).json({ error: 'Video ini sudah ada di dalam queue.' });
+  }
+
+  await db.addVideo({
+    videoId,
+    title: `Video (${videoId})`,
+    thumbnail: getYouTubeThumbnail(videoId),
+    addedBy: username
+  });
+
+  await broadcastUpdate();
+  res.json({ success: true });
+});
+
+// Update Title
+app.post('/api/update-title', async (req, res) => {
+  const { videoId, title } = req.body;
+  if (videoId && title) {
+    await db.updateTitle(videoId, title);
+    await broadcastUpdate();
+  }
+  res.json({ success: true });
+});
+
+// Video Ended
+app.post('/api/video-ended', async (req, res) => {
+  await db.removeNext();
+  await broadcastUpdate();
+  res.json({ success: true });
+});
+
+// Admin: Skip
+app.post('/api/admin/skip', async (req, res) => {
+  const { adminKey } = req.body;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'Unauthorized' });
+
+  await db.removeNext();
+  await broadcastUpdate();
+  res.json({ success: true });
+});
+
+// Admin: Remove By ID
+app.post('/api/admin/remove', async (req, res) => {
+  const { adminKey, id } = req.body;
+  if (adminKey !== ADMIN_SECRET) return res.status(403).json({ error: 'Unauthorized' });
+
+  await db.removeById(id);
+  await broadcastUpdate();
+  res.json({ success: true });
+});
+
+// Admin: Toggle Service
+app.post('/api/admin/service', async (req, res) => {
   const { secret, enabled } = req.body;
-  if (secret !== ADMIN_SECRET) {
-    console.log(`[🚫] Admin Service Access Denied: Incorrect Secret. Expected length: ${ADMIN_SECRET.length}`);
-    return res.status(403).json({ error: 'Akses ditolak. Secret salah.' });
-  }
-  console.log(`[✅] Admin Service Access Granted.`);
-  if (typeof enabled !== 'boolean') {
-    return res.status(400).json({ error: 'Field "enabled" harus boolean.' });
-  }
-  serviceEnabled = enabled;
-  // Broadcast perubahan ke semua client
-  io.emit('service-status', { serviceEnabled });
-  console.log(`[⚙] Service ${serviceEnabled ? 'ON' : 'OFF'} oleh admin.`);
-  res.json({ success: true, serviceEnabled });
+  if (secret !== ADMIN_SECRET) return res.status(403).json({ error: 'Akses ditolak.' });
+
+  await db.setServiceStatus(enabled);
+  pusher.trigger('yt-player-channel', 'service-status', { serviceEnabled: enabled });
+  res.json({ success: true, serviceEnabled: enabled });
 });
 
-// ─── Socket.io ───────────────────────────────────────────────────────────────
-io.on('connection', (socket) => {
-  console.log(`[+] Connected: ${socket.id}`);
-
-  // Send current state on join (including service status)
-  socket.emit('service-status', { serviceEnabled });
-  socket.emit('sync-state', { queue, currentIndex });
-
-  // ── Login ──
-  socket.on('login', ({ username, adminKey }) => {
-    const name = (username || '').trim().slice(0, 32);
-    if (!name) {
-      socket.emit('login-error', 'Username tidak boleh kosong.');
-      return;
-    }
-
-    const role = (adminKey === ADMIN_SECRET) ? 'admin' : 'user';
-    console.log(`[🔐] Login Attempt: User="${name}", Role="${role}", KeyMatch=${adminKey === ADMIN_SECRET}`);
-    
-    users[socket.id] = { username: name, role };
-
-    socket.emit('login-success', { username: name, role });
-    io.emit('user-count', Object.keys(users).length);
-    console.log(`[*] Login: ${name} (${socket.id}) as ${role}`);
-  });
-
-  // ── Add Video ──
-  socket.on('add-video', ({ url }) => {
-    const user = users[socket.id];
-    if (!user) {
-      socket.emit('add-error', 'Silakan login terlebih dahulu.');
-      return;
-    }
-
-    const videoId = extractVideoId((url || '').trim());
-    if (!videoId) {
-      socket.emit('add-error', 'URL YouTube tidak valid. Contoh: https://youtube.com/watch?v=xxxxx');
-      return;
-    }
-
-    // Prevent duplicates already in queue
-    if (queue.some(v => v.videoId === videoId)) {
-      socket.emit('add-error', 'Video ini sudah ada di dalam queue.');
-      return;
-    }
-
-    const item = {
-      id: ++idCounter,
-      videoId,
-      title: `Video (${videoId})`,  // Title updated after client loads player info
-      thumbnail: getYouTubeThumbnail(videoId),
-      addedBy: user.username,
-    };
-
-    queue.push(item);
-
-    // If nothing is playing, start playing this video
-    if (currentIndex === -1) {
-      currentIndex = 0;
-    }
-
-    console.log(`[+] Queue add: ${videoId} by ${user.username}`);
-    io.emit('queue-update', { queue, currentIndex });
-    socket.emit('add-success');
-  });
-
-  // ── Update video title (from YouTube API metadata on client) ──
-  socket.on('update-title', ({ videoId, title }) => {
-    const item = queue.find(v => v.videoId === videoId);
-    if (item && title) {
-      item.title = title;
-      io.emit('queue-update', { queue, currentIndex });
-    }
-  });
-
-  // ── Video ended → play next ──
-  socket.on('video-ended', () => {
-    if (queue.length === 0) {
-      currentIndex = -1;
-      io.emit('queue-update', { queue, currentIndex });
-      return;
-    }
-
-    // Remove the video that just ended
-    queue.shift();
-
-    if (queue.length > 0) {
-      currentIndex = 0;
-    } else {
-      currentIndex = -1;
-    }
-
-    console.log(`[>] Next video. Queue length: ${queue.length}`);
-    io.emit('queue-update', { queue, currentIndex });
-  });
-
-  // ── Skip (admin only) ──
-  socket.on('skip-video', () => {
-    const user = users[socket.id];
-    if (!user || user.role !== 'admin') {
-      console.log(`[!] Skip rejected: Unauthorized user ${user ? user.username : 'Unknown'}`);
-      return;
-    }
-
-    if (queue.length === 0) return;
-
-    queue.shift();
-    currentIndex = queue.length > 0 ? 0 : -1;
-
-    console.log(`[>>] Skipped by ${user.username}`);
-    io.emit('queue-update', { queue, currentIndex });
-  });
-
-  // ── Remove from queue (admin only) ──
-  socket.on('remove-video', ({ id }) => {
-    const user = users[socket.id];
-    if (!user || user.role !== 'admin') {
-      console.log(`[!] Remove rejected: Unauthorized user ${user ? user.username : 'Unknown'}`);
-      return;
-    }
-
-    const idx = queue.findIndex(v => v.id === id);
-    if (idx === -1) return;
-
-    // If removing currently playing video, treat as skip
-    if (idx === currentIndex) {
-      queue.splice(idx, 1);
-      currentIndex = queue.length > 0 ? 0 : -1;
-    } else if (idx < currentIndex) {
-      queue.splice(idx, 1);
-      currentIndex -= 1;
-    } else {
-      queue.splice(idx, 1);
-    }
-
-    io.emit('queue-update', { queue, currentIndex });
-  });
-
-  // ── Disconnect ──
-  socket.on('disconnect', () => {
-    delete users[socket.id];
-    io.emit('user-count', Object.keys(users).length);
-    console.log(`[-] Disconnected: ${socket.id}`);
-  });
-});
-
-// ─── Start Server ────────────────────────────────────────────────────────────
+// ─── Initialize DB & Start ───────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`\n🎬 YouTube Queue Player running at http://localhost:${PORT}\n`);
-});
+
+// On Vercel, we don't 'listen' like this, but this is for local testing
+if (process.env.NODE_ENV !== 'production') {
+  initDB().then(() => {
+    app.listen(PORT, () => {
+      console.log(`\n🎬 YouTube Queue Player running at http://localhost:${PORT}\n`);
+    });
+  });
+} else {
+  // On Vercel, init during first request or at top level if possible
+  initDB().catch(err => console.error('DB Init Error:', err));
+}
+
+module.exports = app;
