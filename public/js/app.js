@@ -58,6 +58,14 @@ async function initRealtime() {
     pusher = new Pusher(pusherKey, { cluster: pusherCluster });
     channel = pusher.subscribe('yt-player-channel');
 
+    pusher.connection.bind('connected', () => {
+      userCountEl.innerHTML = '<span class="online-dot"></span> Synced Real-time';
+    });
+
+    pusher.connection.bind('disconnected', () => {
+      userCountEl.innerHTML = '<span class="online-dot offline"></span> Offline';
+    });
+
     // 3. Bind Events
     channel.bind('queue-update', ({ queue, currentIndex }) => {
       renderQueue(queue, currentIndex);
@@ -162,7 +170,7 @@ function renderQueue(queue, currentIndex) {
         </div>
         <div class="queue-item-actions">
           ${(playing && role === 'admin') ? `<button class="icon-btn skip" onclick="skipVideo()" title="Skip">⏭</button>` : ''}
-          ${(role === 'admin') ? `<button class="icon-btn danger" onclick="removeVideo(${item.id})" title="Hapus">✕</button>` : ''}
+          ${(role === 'admin') ? `<button class="icon-btn danger" onclick="removeVideo('${item.id}')" title="Hapus">✕</button>` : ''}
         </div>
       </div>
     `;
